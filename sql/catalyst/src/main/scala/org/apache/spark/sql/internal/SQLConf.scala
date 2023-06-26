@@ -1500,7 +1500,7 @@ object SQLConf {
       .booleanConf
       .createWithDefault(false)
 
- val V2_BUCKETING_SHUFFLE_ENABLED =
+  val V2_BUCKETING_SHUFFLE_ENABLED =
     buildConf("spark.sql.sources.v2.bucketing.shuffle.enabled")
       .doc("During a storage-partitioned join, whether to allow to shuffle only one side." +
         "When only one side is KeyGroupedPartitioning, if the conditions are met, spark will " +
@@ -1509,6 +1509,18 @@ object SQLConf {
       .version("4.0.0")
       .booleanConf
       .createWithDefault(false)
+
+  val V2_BUCKETING_ALLOW_JOIN_KEYS_SUBSET_OF_PARTITION_KEYS =
+    buildConf("spark.sql.sources.v2.bucketing.allowJoinKeysSubsetOfPartitionKeys.enabled")
+      .doc("Whether to allow storage-partition join in the case where join keys are" +
+        "a subset of the partition keys of the source tables.  At planning time, " +
+        "Spark will group the partitions by only those keys that are in the join keys." +
+        "This is currently enabled only if spark.sql.sources.v2.bucketing.pushPartValues.enabled " +
+        "is also enabled."
+      )
+      .version("4.0.0")
+      .booleanConf
+      .createWithDefault(true)
 
   val BUCKETING_MAX_BUCKETS = buildConf("spark.sql.sources.bucketing.maxBuckets")
     .doc("The maximum number of buckets allowed.")
@@ -4909,8 +4921,13 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
   def v2BucketingPartiallyClusteredDistributionEnabled: Boolean =
     getConf(SQLConf.V2_BUCKETING_PARTIALLY_CLUSTERED_DISTRIBUTION_ENABLED)
 
+<<<<<<< HEAD
   def v2BucketingShuffleEnabled: Boolean =
     getConf(SQLConf.V2_BUCKETING_SHUFFLE_ENABLED)
+=======
+  def v2BucketingAllowJoinKeysSubsetOfPartitionKeys: Boolean =
+    getConf(SQLConf.V2_BUCKETING_ALLOW_JOIN_KEYS_SUBSET_OF_PARTITION_KEYS)
+>>>>>>> c431abb6dd5 ([SQL][SPARK-44647] Support SPJ where join keys are less than cluster keys)
 
   def dataFrameSelfJoinAutoResolveAmbiguity: Boolean =
     getConf(DATAFRAME_SELF_JOIN_AUTO_RESOLVE_AMBIGUITY)

@@ -344,7 +344,11 @@ case class KeyGroupedPartitioning(
           } else {
             // We'll need to find leaf attributes from the partition expressions first.
             val attributes = expressions.flatMap(_.collectLeaves())
-            attributes.forall(x => requiredClustering.exists(_.semanticEquals(x)))
+
+            // Support only when all cluster key have an associated partition expression key
+            requiredClustering.exists(x => attributes.exists(_.semanticEquals(x))) &&
+              // and if all partition expression contain only a single partition key.
+               expressions.forall(_.collectLeaves().size == 1)
           }
 
         case _ =>
@@ -701,39 +705,58 @@ case class KeyGroupedShuffleSpec(
     case otherSpec @ KeyGroupedShuffleSpec(otherPartitioning, otherDistribution) =>
       distribution.clustering.length == otherDistribution.clustering.length &&
         numPartitions == other.numPartitions && areKeysCompatible(otherSpec) &&
-          partitioning.partitionValues.zip(otherPartitioning.partitionValues).forall {
-            case (left, right) =>
-              InternalRowComparableWrapper(left, partitioning.expressions)
-                .equals(InternalRowComparableWrapper(right, partitioning.expressions))
-          }
+        isPartitioningCompatible(otherPartitioning)
     case ShuffleSpecCollection(specs) =>
       specs.exists(isCompatibleWith)
     case _ => false
   }
 
+  def isPartitioningCompatible(otherPartitioning: KeyGroupedPartitioning): Boolean = {
+    val clusterKeySize = keyPositions.size
+    partitioning.partitionValues.zip(otherPartitioning.partitionValues)
+      .forall {
+        case (left, right) =>
+          val leftTypes = partitioning.expressions.map(_.dataType)
+          val leftVals = left.toSeq(leftTypes).take(clusterKeySize).toArray
+          val newLeft = new GenericInternalRow(leftVals)
+
+          val rightTypes = partitioning.expressions.map(_.dataType)
+          val rightVals = right.toSeq(rightTypes).take(clusterKeySize).toArray
+          val newRight = new GenericInternalRow(rightVals)
+
+          InternalRowComparableWrapper(newLeft, partitioning.expressions.take(clusterKeySize))
+            .equals(InternalRowComparableWrapper(
+              newRight, partitioning.expressions.take(clusterKeySize)))
+      }
+  }
+
   // Whether the partition keys (i.e., partition expressions) are compatible between this and the
   // `other` spec.
   def areKeysCompatible(other: KeyGroupedShuffleSpec): Boolean = {
-    val expressions = partitioning.expressions
-    val otherExpressions = other.partitioning.expressions
-
-    expressions.length == otherExpressions.length && {
-      val otherKeyPositions = other.keyPositions
-      keyPositions.zip(otherKeyPositions).forall { case (left, right) =>
-        left.intersect(right).nonEmpty
-      }
-    } && expressions.zip(otherExpressions).forall {
-      case (l, r) => isExpressionCompatible(l, r)
-    }
+    partitionExpressionsCompatible(other) &&
+      KeyGroupedShuffleSpec.keyPositionsCompatible(
+        keyPositions, other.keyPositions
+      )
   }
 
-  private def isExpressionCompatible(left: Expression, right: Expression): Boolean =
-    (left, right) match {
-      case (_: LeafExpression, _: LeafExpression) => true
-      case (left: TransformExpression, right: TransformExpression) =>
-        left.isSameFunction(right)
-      case _ => false
-    }
+  // Whether the partition keys (i.e., partition expressions) that also are in the set of
+  // cluster keys are compatible between this and the 'other' spec.
+  def areClusterPartitionKeysCompatible(other: KeyGroupedShuffleSpec): Boolean = {
+    partitionExpressionsCompatible(other) &&
+      KeyGroupedShuffleSpec.keyPositionsCompatible(
+        keyPositions.filter(_.nonEmpty),
+        other.keyPositions.filter(_.nonEmpty)
+    )
+  }
+
+  private def partitionExpressionsCompatible(other: KeyGroupedShuffleSpec): Boolean = {
+    val left = partitioning.expressions
+    val right = other.partitioning.expressions
+    left.length == right.length &&
+      left.zip(right).forall {
+        case (l, r) => KeyGroupedShuffleSpec.isExpressionCompatible(l, r)
+      }
+  }
 
   override def canCreatePartitioning: Boolean = SQLConf.get.v2BucketingShuffleEnabled &&
     // Only support partition expressions are AttributeReference for now
@@ -741,6 +764,24 @@ case class KeyGroupedShuffleSpec(
 
   override def createPartitioning(clustering: Seq[Expression]): Partitioning = {
     KeyGroupedPartitioning(clustering, partitioning.numPartitions, partitioning.partitionValues)
+  }
+}
+
+object KeyGroupedShuffleSpec {
+
+  def isExpressionCompatible(left: Expression, right: Expression): Boolean =
+    (left, right) match {
+      case (_: LeafExpression, _: LeafExpression) => true
+      case (left: TransformExpression, right: TransformExpression) =>
+        left.isSameFunction(right)
+      case _ => false
+    }
+
+  def keyPositionsCompatible(left: Seq[mutable.BitSet], right: Seq[mutable.BitSet]): Boolean = {
+    left.length == right.length &&
+      left.zip(right).forall { case (left, right) =>
+        left.intersect(right).nonEmpty
+      }
   }
 }
 
