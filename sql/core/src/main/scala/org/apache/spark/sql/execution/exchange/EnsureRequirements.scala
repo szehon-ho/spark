@@ -384,7 +384,12 @@ case class EnsureRequirements(
       isCompatible = leftSpec.isCompatibleWith(rightSpec)
     } else {
       logInfo("Pushing common partition values for storage-partitioned join")
-      isCompatible = leftSpec.areKeysCompatible(rightSpec)
+      // if (group by partition key..)  , check if partition key overlap
+      if (conf.v2BucketingAllowJoinKeysSubsetOfPartitionKeys) {
+        isCompatible = leftSpec.areClusterPartitionKeysCompatible(rightSpec)
+      } else {
+        isCompatible = leftSpec.areKeysCompatible(rightSpec)
+      }
 
       // Partition expressions are compatible. Regardless of whether partition values
       // match from both sides of children, we can calculate a superset of partition values and
@@ -501,15 +506,33 @@ case class EnsureRequirements(
           }
         }
 
+        // only need to check left spec spec, as it should be compatible
+        // with right spec wrt key positions
+        val partitionGroupPositions = getPartitionGroupPositions(leftSpec.keyPositions,
+          conf.v2BucketingAllowJoinKeysSubsetOfPartitionKeys)
+
         // Now we need to push-down the common partition key to the scan in each child
-        newLeft = populatePartitionValues(
-          left, mergedPartValues, applyPartialClustering, replicateLeftSide)
-        newRight = populatePartitionValues(
-          right, mergedPartValues, applyPartialClustering, replicateRightSide)
+        newLeft = populateStoragePartitionJoinParams(
+          left, mergedPartValues, partitionGroupPositions, applyPartialClustering,
+          replicateLeftSide)
+        newRight = populateStoragePartitionJoinParams(
+          right, mergedPartValues, partitionGroupPositions, applyPartialClustering,
+          replicateRightSide)
       }
     }
 
     if (isCompatible) Some(Seq(newLeft, newRight)) else None
+  }
+
+  // Given keyPositions (join key positions), return a sequence of position of partition keys,
+  // to group similar partition values before executing storage-partition join
+  private def getPartitionGroupPositions(keyPositions: Seq[mutable.BitSet],
+    allowJoinKeysSubsetOfPartitionKeys: Boolean): Option[Seq[Boolean]] = {
+    if (allowJoinKeysSubsetOfPartitionKeys) {
+      Some(keyPositions.map(_.nonEmpty))
+    } else {
+      None
+    }
   }
 
   // Similar to `OptimizeSkewedJoin.canSplitRightSide`
@@ -523,23 +546,25 @@ case class EnsureRequirements(
         joinType == LeftAnti || joinType == LeftOuter
   }
 
-  // Populate the common partition values down to the scan nodes
-  private def populatePartitionValues(
+  // Populate the storage partition join params down to the scan nodes
+  private def populateStoragePartitionJoinParams(
       plan: SparkPlan,
       values: Seq[(InternalRow, Int)],
+      partitionGroupByPositions: Option[Seq[Boolean]],
       applyPartialClustering: Boolean,
       replicatePartitions: Boolean): SparkPlan = plan match {
     case scan: BatchScanExec =>
       scan.copy(
         spjParams = scan.spjParams.copy(
           commonPartitionValues = Some(values),
+          partitionGroupByPositions = partitionGroupByPositions,
           applyPartialClustering = applyPartialClustering,
           replicatePartitions = replicatePartitions
         )
       )
     case node =>
-      node.mapChildren(child => populatePartitionValues(
-        child, values, applyPartialClustering, replicatePartitions))
+      node.mapChildren(child => populateStoragePartitionJoinParams(
+        child, values, partitionGroupByPositions, applyPartialClustering, replicatePartitions))
   }
 
   /**
