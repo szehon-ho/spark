@@ -210,15 +210,16 @@ case class BatchScanExec(
 
               // In the case that join keys are less than partition keys, we need to sort
               // the common partition values by join key
-              val sortedCommonPositionByJoinKey = if (spjParams.partitionGroupByPositions.isDefined) {
-                sortCommonPartitionsByJoinKey(
-                  groupedCommonPartValues,
-                  p.expressions,
-                  spjParams.partitionGroupByPositions.get,
-                  spjParams.replicatePartitions)
-              } else {
-                groupedCommonPartValues
-              }
+              val sortedCommonPositionByJoinKey =
+                if (spjParams.partitionGroupByPositions.isDefined) {
+                  sortCommonPartitionsByJoinKey(
+                    groupedCommonPartValues,
+                    p.expressions,
+                    spjParams.partitionGroupByPositions.get,
+                    spjParams.replicatePartitions)
+                } else {
+                  groupedCommonPartValues
+                }
 
               // Now fill missing partition keys with empty partitions
               val partitionMapping = nestGroupedPartitions.toMap
