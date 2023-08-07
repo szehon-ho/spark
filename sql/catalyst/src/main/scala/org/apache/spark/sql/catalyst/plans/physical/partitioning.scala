@@ -344,7 +344,11 @@ case class KeyGroupedPartitioning(
           } else {
             // We'll need to find leaf attributes from the partition expressions first.
             val attributes = expressions.flatMap(_.collectLeaves())
-            requiredClustering.exists(x => attributes.exists(_.semanticEquals(x)))
+
+            // Support only when all cluster key have an associated partition expression key
+            requiredClustering.exists(x => attributes.exists(_.semanticEquals(x))) &&
+              // and if all partition expression contain only a single partition key.
+               expressions.forall(_.collectLeaves().size == 1)
           }
 
         case _ =>
@@ -738,15 +742,11 @@ case class KeyGroupedShuffleSpec(
   // Whether the partition keys (i.e., partition expressions) that also are in the set of
   // cluster keys are compatible between this and the 'other' spec.
   def areClusterPartitionKeysCompatible(other: KeyGroupedShuffleSpec): Boolean = {
-    val partitionExpressionCompatible = partitionExpressionsCompatible(other)
-
-    // keyPositions are only defined for partition expressions that are in cluster keys
-    val keyPositionsComptible = KeyGroupedShuffleSpec.keyPositionsCompatible(
-      keyPositions.filter(_.nonEmpty),
-      other.keyPositions.filter(_.nonEmpty)
+    partitionExpressionsCompatible(other) &&
+      KeyGroupedShuffleSpec.keyPositionsCompatible(
+        keyPositions.filter(_.nonEmpty),
+        other.keyPositions.filter(_.nonEmpty)
     )
-
-    partitionExpressionCompatible && keyPositionsComptible
   }
 
   private def partitionExpressionsCompatible(other: KeyGroupedShuffleSpec): Boolean = {
