@@ -59,7 +59,11 @@ case class BatchScanExec(
   @transient override lazy val inputPartitions: Seq[InputPartition] = batch.planInputPartitions()
 
   @transient override lazy val groupedPartitions: Option[Seq[(InternalRow, Seq[InputPartition])]] =
-    groupPartitions(inputPartitions, spjParams.partitionGroupByPositions)
+    // Early check if we actually need to materialize the input partitions.
+    keyGroupedPartitioning match {
+      case Some(_) => groupPartitions(inputPartitions, spjParams.partitionGroupByPositions)
+      case _ => None
+    }
 
   @transient lazy val groupedCommonPartValues: Option[Seq[(InternalRow, Int)]] = {
     if (spjParams.replicatePartitions) {
