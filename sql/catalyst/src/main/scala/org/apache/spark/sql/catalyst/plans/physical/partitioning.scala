@@ -716,6 +716,9 @@ case class KeyGroupedShuffleSpec(
     partitioning.partitionValues.zip(otherPartitioning.partitionValues)
       .forall {
         case (left, right) =>
+
+          val joinKeyPositions = keyPositions.map(_.nonEmpty)
+
           val leftTypes = partitioning.expressions.map(_.dataType)
           val leftVals = left.toSeq(leftTypes).take(clusterKeySize).toArray
           val newLeft = new GenericInternalRow(leftVals)
@@ -723,6 +726,8 @@ case class KeyGroupedShuffleSpec(
           val rightTypes = partitioning.expressions.map(_.dataType)
           val rightVals = right.toSeq(rightTypes).take(clusterKeySize).toArray
           val newRight = new GenericInternalRow(rightVals)
+
+          val partExprs = partitioning.expressions
 
           InternalRowComparableWrapper(newLeft, partitioning.expressions.take(clusterKeySize))
             .equals(InternalRowComparableWrapper(
