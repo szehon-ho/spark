@@ -1520,7 +1520,7 @@ object SQLConf {
       )
       .version("4.0.0")
       .booleanConf
-      .createWithDefault(true)
+      .createWithDefault(false)
 
   val BUCKETING_MAX_BUCKETS = buildConf("spark.sql.sources.bucketing.maxBuckets")
     .doc("The maximum number of buckets allowed.")
@@ -4921,13 +4921,11 @@ class SQLConf extends Serializable with Logging with SqlApiConf {
   def v2BucketingPartiallyClusteredDistributionEnabled: Boolean =
     getConf(SQLConf.V2_BUCKETING_PARTIALLY_CLUSTERED_DISTRIBUTION_ENABLED)
 
-<<<<<<< HEAD
   def v2BucketingShuffleEnabled: Boolean =
     getConf(SQLConf.V2_BUCKETING_SHUFFLE_ENABLED)
-=======
+
   def v2BucketingAllowJoinKeysSubsetOfPartitionKeys: Boolean =
     getConf(SQLConf.V2_BUCKETING_ALLOW_JOIN_KEYS_SUBSET_OF_PARTITION_KEYS)
->>>>>>> c431abb6dd5 ([SQL][SPARK-44647] Support SPJ where join keys are less than cluster keys)
 
   def dataFrameSelfJoinAutoResolveAmbiguity: Boolean =
     getConf(DATAFRAME_SELF_JOIN_AUTO_RESOLVE_AMBIGUITY)

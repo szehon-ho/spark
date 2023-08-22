@@ -1305,6 +1305,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
     Seq(true, false).foreach { pushDownValues =>
       Seq(true, false).foreach { partiallyClustered =>
         Seq(true, false).foreach { allowJoinKeysSubsetOfPartitionKeys =>
+
           withSQLConf(
             SQLConf.REQUIRE_ALL_CLUSTER_KEYS_FOR_CO_PARTITION.key -> "false",
             SQLConf.V2_BUCKETING_PUSH_PART_VALUES_ENABLED.key -> pushDownValues.toString,
@@ -1443,6 +1444,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
     Seq(true, false).foreach { pushDownValues =>
       Seq(true, false).foreach { partiallyClustered =>
         Seq(true, false).foreach { allowJoinKeysSubsetOfPartitionKeys =>
+
           withSQLConf(
             SQLConf.REQUIRE_ALL_CLUSTER_KEYS_FOR_CO_PARTITION.key -> "false",
             SQLConf.V2_BUCKETING_PUSH_PART_VALUES_ENABLED.key -> pushDownValues.toString,

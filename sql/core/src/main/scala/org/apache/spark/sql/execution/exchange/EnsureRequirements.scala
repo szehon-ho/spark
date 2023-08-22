@@ -386,7 +386,7 @@ case class EnsureRequirements(
       logInfo("Pushing common partition values for storage-partitioned join")
       // if (group by partition key..)  , check if partition key overlap
       if (conf.v2BucketingAllowJoinKeysSubsetOfPartitionKeys) {
-        isCompatible = leftSpec.areClusterPartitionKeysCompatible(rightSpec)
+        isCompatible = leftSpec.areJoinKeysCompatible(rightSpec)
       } else {
         isCompatible = leftSpec.areKeysCompatible(rightSpec)
       }
@@ -508,15 +508,15 @@ case class EnsureRequirements(
 
         // only need to check left spec spec, as it should be compatible
         // with right spec wrt key positions
-        val partitionGroupPositions = getPartitionGroupPositions(leftSpec.keyPositions,
+        val joinKeyPositions = getJoinKeyPositions(leftSpec.keyPositions,
           conf.v2BucketingAllowJoinKeysSubsetOfPartitionKeys)
 
         // Now we need to push-down the common partition key to the scan in each child
         newLeft = populateStoragePartitionJoinParams(
-          left, mergedPartValues, partitionGroupPositions, applyPartialClustering,
+          left, mergedPartValues, joinKeyPositions, applyPartialClustering,
           replicateLeftSide)
         newRight = populateStoragePartitionJoinParams(
-          right, mergedPartValues, partitionGroupPositions, applyPartialClustering,
+          right, mergedPartValues, joinKeyPositions, applyPartialClustering,
           replicateRightSide)
       }
     }
@@ -524,9 +524,9 @@ case class EnsureRequirements(
     if (isCompatible) Some(Seq(newLeft, newRight)) else None
   }
 
-  // Given keyPositions (join key positions), return a sequence of position of partition keys,
+  // Given keyPositions, return a sequence of position of partition keys that are join keys,
   // to group similar partition values before executing storage-partition join
-  private def getPartitionGroupPositions(keyPositions: Seq[mutable.BitSet],
+  private def getJoinKeyPositions(keyPositions: Seq[mutable.BitSet],
     allowJoinKeysSubsetOfPartitionKeys: Boolean): Option[Seq[Boolean]] = {
     if (allowJoinKeysSubsetOfPartitionKeys) {
       Some(keyPositions.map(_.nonEmpty))
@@ -550,21 +550,21 @@ case class EnsureRequirements(
   private def populateStoragePartitionJoinParams(
       plan: SparkPlan,
       values: Seq[(InternalRow, Int)],
-      partitionGroupByPositions: Option[Seq[Boolean]],
+      joinKeyPositions: Option[Seq[Boolean]],
       applyPartialClustering: Boolean,
       replicatePartitions: Boolean): SparkPlan = plan match {
     case scan: BatchScanExec =>
       scan.copy(
         spjParams = scan.spjParams.copy(
           commonPartitionValues = Some(values),
-          partitionGroupByPositions = partitionGroupByPositions,
+          joinKeyPositions = joinKeyPositions,
           applyPartialClustering = applyPartialClustering,
           replicatePartitions = replicatePartitions
         )
       )
     case node =>
       node.mapChildren(child => populateStoragePartitionJoinParams(
-        child, values, partitionGroupByPositions, applyPartialClustering, replicatePartitions))
+        child, values, joinKeyPositions, applyPartialClustering, replicatePartitions))
   }
 
   /**
