@@ -718,17 +718,6 @@ case class KeyGroupedShuffleSpec(
     case _ => false
   }
 
-  def isPartitioningCompatible(otherPartitioning: KeyGroupedPartitioning): Boolean = {
-    val joinKeyPositions = keyPositions.map(_.nonEmpty)
-    partitioning.partitionValues.zip(otherPartitioning.partitionValues)
-      .forall {
-        case (left, right) =>
-          KeyGroupedShuffleSpec.project(left, partitioning.expressions, joinKeyPositions)
-            .equals(
-              KeyGroupedShuffleSpec.project(right, partitioning.expressions, joinKeyPositions))
-      }
-  }
-
   // Whether the partition keys (i.e., partition expressions) are compatible between this and the
   // other spec.
   def areKeysCompatible(other: KeyGroupedShuffleSpec): Boolean = {
@@ -781,19 +770,6 @@ object KeyGroupedShuffleSpec {
       left.zip(right).forall { case (left, right) =>
         left.intersect(right).nonEmpty
       }
-  }
-
-  def project(row: InternalRow, expressions: Seq[Expression],
-    joinKeyPositions: Seq[Boolean]): InternalRowComparableWrapper = {
-    val projectedExprs = expressions.zip(joinKeyPositions)
-      .filter(_._2)
-      .map(_._1)
-    val projectedVals = row.toSeq(expressions.map(_.dataType))
-      .zip(joinKeyPositions)
-      .filter(_._2)
-      .map(_._1)
-    val newRow = InternalRow.fromSeq(projectedVals)
-    InternalRowComparableWrapper(newRow, projectedExprs)
   }
 }
 
