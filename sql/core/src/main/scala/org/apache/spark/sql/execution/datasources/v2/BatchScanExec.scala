@@ -93,7 +93,7 @@ case class BatchScanExec(
         // We need to group the common partition value and sort them by join keys
         val groupedMap = new mutable.HashMap[InternalRowComparableWrapper, Int]
         commonValues
-          .map(p => (partitionRow(p._1, expressions, spjParams.joinKeyPositions), p._2))
+          .map(p => (projectedComparator(p._1, expressions, spjParams.joinKeyPositions), p._2))
           .foreach(p => groupedMap.put(p._1, groupedMap.getOrElse(p._1, 0) + p._2)
           )
         val groupedPartitions = groupedMap.map(r => (r._1.row, r._2)).toSeq
@@ -194,7 +194,7 @@ case class BatchScanExec(
         }
 
         val finalPartValues = if (groupByJoinKeys) {
-          newPartValues.map(r => projectRow(r, newExpressions, spjParams.joinKeyPositions))
+          newPartValues.map(r => projectedRow(r, newExpressions, spjParams.joinKeyPositions))
         } else {
           newPartValues
         }
@@ -289,7 +289,7 @@ case class BatchScanExec(
               (p.head.asInstanceOf[HasPartitionKey].partitionKey(), p))
             val finalPartitionMapping = if (groupByJoinKeys) {
               partitionMapping.map {
-                case (k, v) => (projectRow(k, p.expressions, spjParams.joinKeyPositions), v)
+                case (k, v) => (projectedRow(k, p.expressions, spjParams.joinKeyPositions), v)
               }
             } else {
               partitionMapping

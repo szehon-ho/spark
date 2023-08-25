@@ -150,7 +150,7 @@ trait DataSourceV2ScanExecBase extends LeafExecNode {
           val projected = projectIfNecessary(expressions,
             partitionGroupByPositions, "partition expressions")
           val parts = results
-            .map(t => (partitionRow(t._1,
+            .map(t => (projectedComparator(t._1,
               expressions,
               partitionGroupByPositions),
               t._2))
@@ -191,7 +191,7 @@ trait DataSourceV2ScanExecBase extends LeafExecNode {
     }
   }
 
-  def projectRow(row: InternalRow,
+  def projectedRow(row: InternalRow,
     projectedExpressions: Seq[Expression],
     joinKeyPositions: Option[Seq[Boolean]]): InternalRow = {
     if (joinKeyPositions.isDefined) {
@@ -204,7 +204,7 @@ trait DataSourceV2ScanExecBase extends LeafExecNode {
     }
   }
 
-  def partitionRow(row: InternalRow,
+  def projectedComparator(row: InternalRow,
     partitionExpressions: Seq[Expression],
     joinKeyPositions: Option[Seq[Boolean]]): InternalRowComparableWrapper = {
     if (joinKeyPositions.isDefined) {
