@@ -1522,7 +1522,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
           val scans = collectScans(df.queryExecution.executedPlan).map(_.inputRDD.
             partitions.length)
 
-          val expectedBuckets = Math.min(2, 4)
+          val expectedBuckets = Math.min(table1buckets, table2buckets)
 
           assert(scans == Seq(expectedBuckets, expectedBuckets))
           // Not coming till point
