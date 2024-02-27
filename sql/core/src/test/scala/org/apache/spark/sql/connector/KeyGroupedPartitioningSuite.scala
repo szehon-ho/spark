@@ -1549,7 +1549,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
             Row(3, 4, 2, 2, "ad", "04"),
             Row(4, 3, 3, 3, "ae", "05"),
             Row(5, 2, 4, 4, "af", "06"),
-            Row(6, 1, 5, 5, "ag", "07"),
+            Row(6, 1, 5, 5, "ag", "07")
           ))
         }
       }
