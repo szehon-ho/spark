@@ -1482,7 +1482,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
       case (table1buckets, table2buckets) =>
         catalog.clearTables()
 
-        val partition1 = Array(identity("store_id"),
+        val partition1 = Array(identity("data"),
           bucket(table1buckets, "dept_id"))
         val partition2 = Array(bucket(3, "store_id"),
           bucket(table2buckets, "dept_id"))
