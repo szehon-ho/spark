@@ -69,7 +69,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
       .add("data", StringType)
       .add("ts", TimestampType)
     private val schema2 = new StructType()
-      .add("store_id", IntegerType)
+      .add("store_id", LongType)
       .add("dept_id", IntegerType)
       .add("data", StringType)
 
@@ -1467,7 +1467,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
               Row(5, 2, "bm", "bm"),
               Row(5, 3, "bn", "bn"),
               Row(5, 4, "bo", "bo"),
-              Row(5, 5, "bp", "bp"),
+              Row(5, 5, "bp", "bp")
             ))
           }
         }
@@ -1482,7 +1482,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
       case (table1buckets, table2buckets) =>
         catalog.clearTables()
 
-        val partition1 = Array(bucket(3, "store_id"),
+        val partition1 = Array(identity("data"),
           bucket(table1buckets, "dept_id"))
         val partition2 = Array(bucket(3, "store_id"),
           bucket(table2buckets, "dept_id"))
