@@ -1484,7 +1484,7 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
 
         val partition1 = Array(identity("store_id"),
           bucket(table1buckets, "dept_id"))
-        val partition2 = Array(identity("store_id"),
+        val partition2 = Array(bucket(3, "store_id"),
           bucket(table2buckets, "dept_id"))
 
         createTable(table1, schema2, partition1)
