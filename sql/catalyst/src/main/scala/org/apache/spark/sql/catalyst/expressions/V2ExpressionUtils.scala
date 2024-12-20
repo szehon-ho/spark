@@ -30,7 +30,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.catalog.{FunctionCatalog, Identifier}
 import org.apache.spark.sql.connector.catalog.functions._
 import org.apache.spark.sql.connector.catalog.functions.ScalarFunction.MAGIC_METHOD_NAME
-import org.apache.spark.sql.connector.expressions.{BucketTransform, Expression => V2Expression, FieldReference, IdentityTransform, Literal => V2Literal, NamedReference, NamedTransform, NullOrdering => V2NullOrdering, SortDirection => V2SortDirection, SortOrder => V2SortOrder, SortValue, Transform}
+import org.apache.spark.sql.connector.expressions.{BucketTransform, Expression => V2Expression, FieldReference, IdentityTransform, Literal => V2Literal, NamedReference, NamedTransform, NullOrdering => V2NullOrdering, SortDirection => V2SortDirection, SortOrder => V2SortOrder, SortValue, Transform, TruncateTransform}
 import org.apache.spark.sql.errors.DataTypeErrors.toSQLId
 import org.apache.spark.sql.errors.QueryCompilationErrors
 import org.apache.spark.sql.types._
@@ -114,6 +114,15 @@ object V2ExpressionUtils extends SQLConfHelper with Logging {
           TransformExpression(bound, resolvedRefs, Some(numBuckets))
         }
       }
+    case TruncateTransform(len, ref) if ref.isInstanceOf[NamedReference] =>
+      val resolvedRef = resolveRef[NamedExpression](ref, query)
+      val lenRef = AttributeReference("length", IntegerType, nullable = false)()
+      funCatalogOpt.flatMap { catalog =>
+        loadV2FunctionOpt(catalog, "truncate", Seq(lenRef, resolvedRef)).map { bound =>
+          TransformExpression(bound, Seq(resolvedRef), Some(len))
+        }
+      }
+
     case NamedTransform(name, args) =>
       val catalystArgs = args.map(toCatalyst(_, query, funCatalogOpt))
       funCatalogOpt.flatMap { catalog =>

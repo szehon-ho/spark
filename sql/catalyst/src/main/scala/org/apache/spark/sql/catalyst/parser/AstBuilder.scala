@@ -4083,6 +4083,22 @@ class AstBuilder extends DataTypeAstBuilder
 
             BucketTransform(LiteralValue(numBuckets, IntegerType), fields)
 
+          case "truncate" =>
+            val length: Int = arguments.head match {
+              case LiteralValue(shortValue, ShortType) =>
+                shortValue.asInstanceOf[Short].toInt
+              case LiteralValue(intValue, IntegerType) =>
+                intValue.asInstanceOf[Int]
+              case LiteralValue(longValue, LongType) =>
+                longValue.asInstanceOf[Long].toInt
+              case lit =>
+                throw QueryParsingErrors.invalidBucketsNumberError(lit.describe, applyCtx)
+            }
+
+            val fields = arguments.tail.map(arg => getFieldReference(applyCtx, arg))
+
+            BucketTransform(LiteralValue(length, IntegerType), fields)
+
           case "years" =>
             YearsTransform(getSingleFieldReference(applyCtx, arguments))
 

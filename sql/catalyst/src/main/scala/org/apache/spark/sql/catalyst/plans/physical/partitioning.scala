@@ -383,7 +383,6 @@ case class KeyGroupedPartitioning(
           } else {
             // We'll need to find leaf attributes from the partition expressions first.
             val attributes = expressions.flatMap(_.collectLeaves())
-              .filter(KeyGroupedPartitioning.isReference)
 
             if (SQLConf.get.v2BucketingAllowJoinKeysSubsetOfPartitionKeys) {
               // check that join keys (required clustering keys)
@@ -458,7 +457,14 @@ object KeyGroupedPartitioning {
 
   def supportsExpressions(expressions: Seq[Expression]): Boolean = {
     def isSupportedTransform(transform: TransformExpression): Boolean = {
-      transform.children.count(isReference) == 1
+      transform.children.size == 1 && isReference(transform.children.head)
+    }
+
+    @tailrec
+    def isReference(e: Expression): Boolean = e match {
+      case _: Attribute => true
+      case g: GetStructField => isReference(g.child)
+      case _ => false
     }
 
     expressions.forall {
@@ -466,13 +472,6 @@ object KeyGroupedPartitioning {
       case e: Expression if isReference(e) => true
       case _ => false
     }
-  }
-
-  @tailrec
-  def isReference(e: Expression): Boolean = e match {
-    case _: Attribute => true
-    case g: GetStructField => isReference(g.child)
-    case _ => false
   }
 }
 
@@ -792,7 +791,7 @@ case class KeyGroupedShuffleSpec(
       distKeyToPos.getOrElseUpdate(distKey.canonicalized, mutable.BitSet.empty).add(distKeyPos)
     }
     partitioning.expressions.map { e =>
-      val leaves = e.collectLeaves().filter(KeyGroupedPartitioning.isReference)
+      val leaves = e.collectLeaves()
       assert(leaves.size == 1, s"Expected exactly one child from $e, but found ${leaves.size}")
       distKeyToPos.getOrElse(leaves.head.canonicalized, mutable.BitSet.empty)
     }

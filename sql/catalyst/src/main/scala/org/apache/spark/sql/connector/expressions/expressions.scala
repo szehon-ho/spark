@@ -157,6 +157,29 @@ private[sql] object BucketTransform {
   }
 }
 
+private[sql] final case class TruncateTransform(
+  ref: NamedReference) extends SingleColumnTransform(ref) {
+  override val name: String = "truncate"
+  override protected def withNewRef(ref: NamedReference): Transform = this.copy(ref)
+}
+
+private[sql] object TruncateTransform {
+  def unapply(transform: Transform): Option[(Int, NamedReference)] =
+    transform match {
+      case NamedTransform("truncate", arguments) =>
+        var len: Int = -1
+        arguments(1) match {
+          case Lit(value: Int, IntegerType) =>
+            len = value
+          case _ => throw new SparkException("The first element in TruncateTransform arguments " +
+            "should be an Integer Literal.")
+        }
+        Some(len, arguments(1).asInstanceOf[NamedReference])
+      case _ =>
+        None
+    }
+}
+
 /**
  * This class represents a transform for `ClusterBySpec`. This is used to bundle
  * ClusterBySpec in CreateTable's partitioning transforms to pass it down to analyzer.

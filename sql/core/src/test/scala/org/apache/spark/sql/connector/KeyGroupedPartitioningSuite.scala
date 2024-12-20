@@ -2533,7 +2533,9 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
       s"(40, 80, 'ddd')")
 
     withSQLConf(
-      SQLConf.V2_BUCKETING_PUSH_PART_VALUES_ENABLED.key -> "true") {
+      SQLConf.REQUIRE_ALL_CLUSTER_KEYS_FOR_CO_PARTITION.key -> "false",
+      SQLConf.V2_BUCKETING_PUSH_PART_VALUES_ENABLED.key -> "true",
+      SQLConf.V2_BUCKETING_ALLOW_JOIN_KEYS_SUBSET_OF_PARTITION_KEYS.key -> "true") {
 
       val df =
         sql(
@@ -2549,6 +2551,43 @@ class KeyGroupedPartitioningSuite extends DistributionAndOrderingSuiteBase {
       )
       val scans = collectScans(df.queryExecution.executedPlan)
       assert(scans.forall(_.inputRDD.partitions.length == 4))
+    }
+  }
+
+  test("SPARK-50593: Incompatible truncate transform") {
+    val partitions: Array[Transform] = Array(
+      Expressions.apply("truncate", Expressions.column("data"), Expressions.literal(2))
+    )
+
+    // create a table with 3 partitions, partitioned by `truncate` transform
+    createTable("table", columns, partitions)
+    sql(s"INSERT INTO testcat.ns.table VALUES " +
+      s"(1, 'bbb', CAST('2021-01-01' AS timestamp)), " +
+      s"(2, 'ccc', CAST('2020-01-01' AS timestamp))")
+
+    val partitions2: Array[Transform] = Array(
+      Expressions.apply("truncate", Expressions.column("data"), Expressions.literal(4))
+    )
+
+    createTable("table2", columns2, partitions2)
+    sql(s"INSERT INTO testcat.ns.table2 VALUES " +
+      s"(1, 5, 'aaa')," +
+      s"(5, 10, 'bbb')")
+
+    withSQLConf(
+      SQLConf.REQUIRE_ALL_CLUSTER_KEYS_FOR_CO_PARTITION.key -> "false",
+      SQLConf.V2_BUCKETING_PUSH_PART_VALUES_ENABLED.key -> "true",
+      SQLConf.V2_BUCKETING_ALLOW_JOIN_KEYS_SUBSET_OF_PARTITION_KEYS.key -> "true") {
+
+      val df =
+        sql(
+          selectWithMergeJoinHint("table", "table2") +
+            "id, store_id, dept_id " +
+            "FROM testcat.ns.table JOIN testcat.ns.table2 " +
+            "ON table.data = table2.data " +
+            "SORT BY id, store_id, dept_id")
+      val shuffles = collectShuffles(df.queryExecution.executedPlan)
+      assert(shuffles.nonEmpty, "should not use SPJ for incompatible transforms")
     }
   }
 }
