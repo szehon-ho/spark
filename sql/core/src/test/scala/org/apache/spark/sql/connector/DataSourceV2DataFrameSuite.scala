@@ -27,7 +27,7 @@ import org.apache.spark.sql.connector.catalog.{Column, ColumnDefaultValue, Ident
 import org.apache.spark.sql.connector.expressions.{LiteralValue, Transform}
 import org.apache.spark.sql.execution.{QueryExecution, SparkPlan}
 import org.apache.spark.sql.execution.ExplainUtils.stripAQEPlan
-import org.apache.spark.sql.execution.datasources.v2.{CreateTableExec, DataSourceV2Relation, ReplaceTableExec}
+import org.apache.spark.sql.execution.datasources.v2.{AlterTableExec, CreateTableExec, DataSourceV2Relation, ReplaceTableExec}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{BooleanType, CalendarIntervalType, IntegerType, StringType}
 import org.apache.spark.sql.util.QueryExecutionListener
@@ -423,6 +423,53 @@ class DataSourceV2DataFrameSuite
       checkAnswer(
         sql(s"SELECT * FROM $tableName"),
         Seq(Row(1, 100, "unknown", false)))
+    }
+  }
+
+  test("alter table with complex foldable default values") {
+    val tableName = "testcat.ns1.ns2.tbl"
+    withTable(tableName) {
+      val createExec = executeAndKeepPhysicalPlan[CreateTableExec] {
+        sql(
+          s"""
+             |CREATE TABLE $tableName (
+             |  id INT,
+             |  salary INT DEFAULT (100 + 23),
+             |  dep INT DEFAULT (100 + 50),
+             |  active BOOLEAN DEFAULT CAST(1 AS BOOLEAN)
+             |) USING foo
+             |""".stripMargin)
+      }
+
+      checkDefaultValues(
+        createExec.columns,
+        Array(
+          null,
+          new ColumnDefaultValue(
+            "(100 + 23)",
+            LiteralValue(123, IntegerType),
+            LiteralValue(123, IntegerType)),
+          new ColumnDefaultValue(
+            "(100 + 50)",
+            LiteralValue(150, IntegerType),
+            LiteralValue(150, IntegerType)),
+          new ColumnDefaultValue(
+            "CAST(1 AS BOOLEAN)",
+            LiteralValue(true, BooleanType),
+            LiteralValue(true, BooleanType))))
+
+      val df1 = Seq(1).toDF("id")
+      df1.writeTo(tableName).append()
+
+      val alterExec = executeAndKeepPhysicalPlan[AlterTableExec] {
+        sql(s"ALTER TABLE $tableName ADD COLUMN dep2 INT DEFAULT (150 + 50)")
+      }
+
+      val alterCols = alterExec.changes
+
+      // scalastyle:off println
+      println(alterCols)
+      // scalastyle:on println
     }
   }
 
