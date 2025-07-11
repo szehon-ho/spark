@@ -74,6 +74,10 @@ class PlanChangeLogger[TreeType <: TreeNode[_]] extends Logging {
            // scalastyle:on line.size.limit
         }
 
+        // scalastyle:off println
+        println(message())
+        // scalastyle:on println
+
         logBasedOnLevel(logLevel)(message())
       }
     }

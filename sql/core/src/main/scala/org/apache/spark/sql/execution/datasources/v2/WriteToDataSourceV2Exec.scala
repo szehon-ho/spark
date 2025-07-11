@@ -18,6 +18,7 @@
 package org.apache.spark.sql.execution.datasources.v2
 
 import scala.jdk.CollectionConverters._
+import scala.reflect.ClassTag
 
 import org.apache.spark.{SparkEnv, SparkException, TaskContext}
 import org.apache.spark.internal.{Logging, LogKeys, MDC}
@@ -30,11 +31,12 @@ import org.apache.spark.sql.catalyst.util.{removeInternalMetadata, CharVarcharUt
 import org.apache.spark.sql.catalyst.util.RowDeltaUtils.{DELETE_OPERATION, INSERT_OPERATION, REINSERT_OPERATION, UPDATE_OPERATION, WRITE_OPERATION, WRITE_WITH_METADATA_OPERATION}
 import org.apache.spark.sql.connector.catalog.{CatalogV2Util, Column, Identifier, StagedTable, StagingTableCatalog, Table, TableCatalog, TableInfo, TableWritePrivilege}
 import org.apache.spark.sql.connector.expressions.Transform
-import org.apache.spark.sql.connector.metric.{CustomMetric, CustomTaskMetric}
-import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, DeltaWrite, DeltaWriter, PhysicalWriteInfoImpl, RowLevelOperation, Write, WriterCommitMessage}
+import org.apache.spark.sql.connector.metric.{CustomMetric, MergeMetrics}
+import org.apache.spark.sql.connector.write.{BatchWrite, DataWriter, DataWriterFactory, DeltaWrite, DeltaWriter, PhysicalWriteInfoImpl, RowLevelOperationTable, Write, WriterCommitMessage}
 import org.apache.spark.sql.errors.{QueryCompilationErrors, QueryExecutionErrors}
 import org.apache.spark.sql.execution.{SparkPlan, SQLExecution, UnaryExecNode}
 import org.apache.spark.sql.execution.adaptive.AdaptiveSparkPlanHelper
+import org.apache.spark.sql.execution.joins.BaseJoinExec
 import org.apache.spark.sql.execution.metric.{CustomMetrics, SQLMetric, SQLMetrics}
 import org.apache.spark.sql.types.StructType
 import org.apache.spark.util.{LongAccumulator, Utils}
@@ -424,21 +426,6 @@ trait V2TableWriteExec extends V2CommandExec with UnaryExecNode with AdaptiveSpa
       }
     }
 
-    val metricsOpt = batchWrite.requestExecMetrics() match {
-      case RowLevelOperation.Command.MERGE =>
-        collectFirst(query) {
-          case m: MergeRowsExec => m.metrics
-        }
-      case _ => None
-    }
-    metricsOpt.foreach { metrics =>
-      batchWrite.execMetrics(
-        metrics.map {
-          case (k, v) => V2ExecMetric(k, v.value)
-        }.toArray
-      )
-    }
-
     // introduce a local var to avoid serializing the whole class
     val task = writingTask
     val writerFactory = batchWrite.createBatchWriterFactory(
@@ -468,8 +455,17 @@ trait V2TableWriteExec extends V2CommandExec with UnaryExecNode with AdaptiveSpa
         }
       )
 
+      val mergeMetricsOpt = if (batchWrite.requestMergeMetrics()) {
+        Some(getMergeMetrics(query))
+      } else {
+        None
+      }
+
       logInfo(log"Data source write support ${MDC(LogKeys.BATCH_WRITE, batchWrite)} is committing.")
-      batchWrite.commit(messages)
+      mergeMetricsOpt match {
+        case Some(metrics) => batchWrite.commitWithMerge(messages, metrics)
+        case None => batchWrite.commit(messages)
+      }
       logInfo(log"Data source write support ${MDC(LogKeys.BATCH_WRITE, batchWrite)} committed.")
       commitProgress = Some(StreamWriterCommitProgress(totalNumRowsAccumulator.value))
     } catch {
@@ -490,6 +486,78 @@ trait V2TableWriteExec extends V2CommandExec with UnaryExecNode with AdaptiveSpa
     }
 
     Nil
+  }
+
+  private def getMergeMetrics(query: SparkPlan): MergeMetrics = {
+      val mergeMetricsBuilder = new MergeMetrics.Builder()
+
+      for {
+        // Find MergeRowExec
+        mergeNode <- firstChild[MergeRowsExec](query)
+        _ <- mergeMetrics(mergeNode.metrics, mergeMetricsBuilder)
+
+        // Find first Join of MergeRowExec Join
+        join <- firstChild[BaseJoinExec](mergeNode)
+        left <- joinChild(join, 0)
+        right <- joinChild(join, 1)
+
+        // Find which side is target
+        leftTarget = findRowLevelOperationTable(left).nonEmpty
+
+        // Find source in the other side
+        source <- if (leftTarget) {
+          firstChildWithOutputRow(right)
+        } else {
+          firstChildWithOutputRow(left)
+        }
+      } mergeMetricsBuilder.numSourceRows(metric(source.metrics, "numOutputRows"))
+    mergeMetricsBuilder.build()
+  }
+
+  private def metric(metrics: Map[String, SQLMetric], metric: String): Long = {
+    metrics.get(metric) match {
+      case Some(m) => m.value
+      case None => -1
+    }
+  }
+
+  private def firstChildWithOutputRow(plan: SparkPlan) : Option[SparkPlan] = {
+    collectFirst(plan) { case c: SparkPlan if c.metrics.contains("numOutputRows") => c }
+  }
+
+  private def firstChild[T: ClassTag](plan: SparkPlan): Option[T] = {
+    collectFirst(plan) { case c: T => c }
+  }
+
+  private def findRowLevelOperationTable(plan: SparkPlan): Option[RowLevelOperationTable] = {
+    collectFirst(plan) {
+      case scan: BatchScanExec if scan.table.isInstanceOf[RowLevelOperationTable] =>
+        scan.table.asInstanceOf[RowLevelOperationTable]
+    }
+  }
+
+  private def joinChild(join: BaseJoinExec, pos: Int): Option[SparkPlan] = {
+    if (join.children.length == 2) {
+      Some(join.children(pos))
+    } else {
+      None
+    }
+  }
+
+  private def mergeMetrics(mergeNodeMetrics: Map[String, SQLMetric],
+                           metricBuilder: MergeMetrics.Builder): Option[MergeMetrics.Builder] = {
+    metricBuilder
+      .numTargetRowsCopied(metric(mergeNodeMetrics, "numTargetRowsCopied"))
+      .numTargetRowsDeleted(metric(mergeNodeMetrics, "numTargetRowsDeleted"))
+      .numTargetRowsUpdated(metric(mergeNodeMetrics, "numTargetRowsUpdated"))
+      .numTargetRowsInserted(metric(mergeNodeMetrics, "numTargetRowsInserted"))
+      .numTargetRowsNotMatchedBySourceDeleted(
+        metric(mergeNodeMetrics, "numTargetRowsNotMatchedBySourceDeleted"))
+      .numTargetRowsNotMatchedBySourceUpdated(
+        metric(mergeNodeMetrics, "numTargetRowsNotMatchedBySourceUpdated"))
+      .numTargetRowsMatchedDeleted(metric(mergeNodeMetrics, "numTargetRowsMatchedDeleted"))
+      .numTargetRowsMatchedUpdated(metric(mergeNodeMetrics, "numTargetRowsMatchedUpdated"))
+    Some(metricBuilder)
   }
 }
 
@@ -745,5 +813,3 @@ private[v2] case class DataWritingSparkTaskResult(
  * Sink progress information collected after commit.
  */
 private[sql] case class StreamWriterCommitProgress(numOutputRows: Long)
-
-private [v2] case class V2ExecMetric(name: String, value: Long) extends CustomTaskMetric
