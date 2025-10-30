@@ -50,7 +50,7 @@ object AssignmentUtils extends SQLConfHelper with CastSupport {
    *
    * @param attrs table attributes
    * @param assignments assignments to align
-   * @param coerceNestedType whether to coerce nested types to match the target type
+   * @param coerceNestedTypes whether to coerce nested types to match the target type
    *                         for complex types
    * @return aligned update assignments that match table attributes
    */
@@ -77,69 +77,83 @@ object AssignmentUtils extends SQLConfHelper with CastSupport {
 
     attrs.zip(output).map { case (attr, expr) => Assignment(attr, expr) }
   }
-
   /**
    * Aligns insert assignments to match table columns.
    * <p>
    * This method processes and reorders given assignments so that each target column gets
    * an expression it should be set to. There must be exactly one assignment for each top-level
    * attribute and its value must be compatible.
-   * <p>
-   * Insert assignments cannot refer to nested columns.
    *
-   * @param attrs table attributes
+   * @param attrs       table attributes
    * @param assignments insert assignments to align
-   * @param coerceNestedTypes whether to coerce nested types to match the target type
-   *                          for complex types
    * @return aligned insert assignments that match table attributes
    */
   def alignInsertAssignments(
       attrs: Seq[Attribute],
       assignments: Seq[Assignment],
-      coerceNestedTypes: Boolean = false): Seq[Assignment] = {
+      coerceNestedTypes: Boolean): Seq[Assignment] = {
 
     val errors = new mutable.ArrayBuffer[String]()
 
-    val (topLevelAssignments, nestedAssignments) = assignments.partition { assignment =>
-      assignment.key.isInstanceOf[Attribute]
-    }
-
-    if (nestedAssignments.nonEmpty) {
-      val nestedAssignmentsStr = nestedAssignments.map(_.sql).mkString(", ")
-      errors += s"INSERT assignment keys cannot be nested fields: $nestedAssignmentsStr"
-    }
-
     val alignedAssignments = attrs.map { attr =>
-      val matchingAssignments = topLevelAssignments.collect {
-        case assignment if assignment.key.semanticEquals(attr) => assignment
-      }
-      val resolvedValue = if (matchingAssignments.isEmpty) {
-        val defaultExpr = getDefaultValueExprOrNullLit(
-          attr, conf.useNullsForMissingDefaultColumnValues)
-        if (defaultExpr.isEmpty) {
-          errors += s"No assignment for '${attr.name}'"
-        }
-        defaultExpr.getOrElse(attr)
-      } else if (matchingAssignments.length > 1) {
-        val conflictingValuesStr = matchingAssignments.map(_.value.sql).mkString(", ")
-        errors += s"Multiple assignments for '${attr.name}': $conflictingValuesStr"
-        attr
-      } else {
-        val colPath = Seq(attr.name)
-        val actualAttr = restoreActualType(attr)
-        val value = matchingAssignments.head.value
-        val coerceMode = if (coerceNestedTypes) RECURSE else NONE
-        TableOutputResolver.resolveUpdate(
-          "", value, actualAttr, conf, err => errors += err, colPath, coerceMode)
-      }
-      Assignment(attr, resolvedValue)
+      applyInsertAssignment(
+        col = restoreActualType(attr),
+        colExpr = attr,
+        assignments,
+        addError = err => errors += err,
+        colPath = Seq(attr.name),
+        coerceNestedTypes)
     }
 
     if (errors.nonEmpty) {
       throw QueryCompilationErrors.invalidRowLevelOperationAssignments(assignments, errors.toSeq)
     }
 
-    alignedAssignments
+    attrs.zip(alignedAssignments).map { case (attr, expr) => Assignment(attr, expr) }
+  }
+
+  private def applyInsertAssignment(
+      col: Attribute,
+      colExpr: Expression,
+      assignments: Seq[Assignment],
+      addError: String => Unit,
+      colPath: Seq[String],
+      coerceNestedTypes: Boolean): Expression = {
+    val (exactAssignments, otherAssignments) = assignments.partition { assignment =>
+      assignment.key.semanticEquals(colExpr)
+    }
+
+    val fieldAssignments = otherAssignments.filter { assignment =>
+      assignment.key.exists(_.semanticEquals(colExpr))
+    }
+
+    if (exactAssignments.isEmpty && fieldAssignments.isEmpty) {
+      val defaultExpr = getDefaultValueExprOrNullLit(
+        col, conf.useNullsForMissingDefaultColumnValues)
+      if (defaultExpr.isEmpty) {
+        addError(s"No assignment for '${col.name}'")
+      }
+      defaultExpr.getOrElse(col)
+    } else if (exactAssignments.length > 1) {
+      val conflictingValuesStr = exactAssignments.map(_.value.sql).mkString(", ")
+      addError(s"Multiple assignments for '${col.name}': $conflictingValuesStr")
+      col
+    } else if (exactAssignments.nonEmpty && fieldAssignments.nonEmpty) {
+      val conflictingAssignments = exactAssignments ++ fieldAssignments
+      val conflictingAssignmentsStr = conflictingAssignments.map(_.sql).mkString(", ")
+      addError(s"Conflicting assignments for '${col.name}': $conflictingAssignmentsStr")
+      col
+    } else if (exactAssignments.nonEmpty) {
+      val colPath = Seq(col.name)
+      val actualAttr = restoreActualType(col)
+      val value = exactAssignments.head.value
+      val coerceMode = if (coerceNestedTypes) RECURSE else NONE
+      TableOutputResolver.resolveUpdate(
+        "", value, actualAttr, conf, addError, colPath, coerceMode)
+    } else {
+      applyFieldAssignments(restoreActualType(col),
+        col, fieldAssignments, addError, colPath, coerceNestedTypes)
+    }
   }
 
   private def restoreActualType(attr: Attribute): Attribute = {
